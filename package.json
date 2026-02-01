@@ -1,0 +1,54 @@
+{
+	"name": "arterial",
+	"version": "0.0.2",
+	"description": "A self-healing communication layer for adaptive and resilient systems",
+	"type": "module",
+	"main": "./dist/arterial.mjs",
+	"types": "./dist/arterial.d.mts",
+	"engines": {
+		"node": ">=22.0.0"
+	},
+	"scripts": {
+		"build": "tsdown ./src/arterial.ts ./src/transports/*.ts  --unbundle --dts",
+		"test": "vitest"
+	},
+	"author": "Flynn Buckingham",
+	"license": "MIT",
+	"files": [
+		".github/logo.svg",
+		"readme.md",
+		"package.json",
+		"package-lock.json",
+		"INTENT",
+		"src/",
+		"dist/"
+	],
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/f1yn/arterial.git"
+	},
+	"exports": {
+		".": {
+			"types": "./dist/arterial.d.mts",
+			"import": "./dist/arterial.mjs",
+			"default": "./dist/arterial.mjs"
+		},
+		"./transports/websocket": {
+			"types": "./dist/transports/websocket.d.mts",
+			"import": "./dist/transports/websocket.mjs"
+		},
+		"./transports/messagePort": {
+			"types": "./dist/transports/messagePort.d.mts",
+			"import": "./dist/transports/messagePort.mjs"
+		}
+	},
+	"devDependencies": {
+		"@types/ws": "^8.18.1",
+		"tsdown": "^0.20.1",
+		"typescript": "^5.9.3",
+		"vitest": "^4.0.18"
+	},
+	"peerDependencies": {
+		"ws": "^8.19.0"
+	}
+}
