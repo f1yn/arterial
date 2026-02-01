@@ -1,6 +1,6 @@
 {
 	"name": "arterial",
-	"version": "0.0.3",
+	"version": "0.0.4",
 	"description": "A self-healing communication layer for adaptive and resilient systems",
 	"type": "module",
 	"main": "./dist/arterial.mjs",
@@ -10,6 +10,7 @@
 	},
 	"scripts": {
 		"build": "tsdown ./src/arterial.ts ./src/transports/*.ts  --unbundle --dts",
+		"dev": "npm run build -- --watch",
 		"test": "vitest"
 	},
 	"author": "Flynn Buckingham",
@@ -36,7 +37,7 @@
 		"./transports/websocket": {
 			"types": "./dist/transports/websocket.d.mts",
 			"import": "./dist/transports/websocket.mjs",
-			"default":"./dist/transports/websocket.mjs"
+			"default": "./dist/transports/websocket.mjs"
 		},
 		"./transports/messagePort": {
 			"types": "./dist/transports/messagePort.d.mts",
@@ -46,7 +47,8 @@
 		"./package.json": {
 			"import": "./package.json",
 			"default": "./package.json"
-		}
+		},
+		"./src/*": "./src/*"
 	},
 	"devDependencies": {
 		"@types/ws": "^8.18.1",

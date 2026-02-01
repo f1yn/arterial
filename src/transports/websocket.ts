@@ -1,8 +1,9 @@
-
-import type { ArterialMessage, ArterialTransportConsumer } from "../shared";
+import type { Arterial } from "../arterial";
+import type { ArterialMessage, ArterialTransportConsumer, ArterialPrimaryLoopType } from "../shared";
 import { type WebSocketServer, WebSocket as WsSocket } from "ws";
 
 export function websocketStem({ wss }: { wss: WebSocketServer }) {
+	let context: { arterial: Arterial, primaryArterialLoop: ArterialPrimaryLoopType };
 	let socket: WsSocket;
 
 	async function sendMessage<DataType = unknown>(message: ArterialMessage<DataType>) {
@@ -17,35 +18,40 @@ export function websocketStem({ wss }: { wss: WebSocketServer }) {
 	}
 
 	return {
-		async init(arterial, primaryArterialLoop) {
-			socket = await new Promise<WsSocket>((resolve) => {
-				wss.once('connection', (ws) => resolve(ws));
-			});
+		init(arterial, primaryArterialLoop) {
+			context = { arterial, primaryArterialLoop }
+		},
+		async connect() {
+			if (!context) throw new Error('Transport not initialized');
+			const transport = this;
 
-			// Setup the incoming message listener
-			socket.on('message', async (data) => {
-				try {
-					const parsedMessage = JSON.parse(data.toString()) as ArterialMessage;
-					console.log(parsedMessage);
-					await primaryArterialLoop(parsedMessage, this);
-				} catch (e) {
-					console.error('Failed to parse incoming WS message', e);
-				}
-			});
+			wss.on('connection', (ws) => {
+				socket = ws;
 
-			const pendingResponse = arterial.waitFor((message) => (
-				message.as === 'ready' &&
-				message.sourceId === arterial.config.primaryDestinationId
-			));
+				ws.on('message', async (data) => {
+					try {
+						const message = JSON.parse(data.toString()) as ArterialMessage;
 
-			await pendingResponse;
+						// HANDSHAKE INTERCEPT
+						// If a Consumer (re)loads and sends 'ready', we must ACK it immediately.
+						// This allows the Consumer to finish its own connect() sequence.
+						if (message.as === 'ready' && message.destinationId === context!.arterial.config.id) {
+							sendMessage({
+								as: 'ready-ack',
+								venousId: context.arterial.config.venousId,
+								sourceId: context.arterial.config.id,
+								destinationId: message.sourceId,
+								data: null,
+							});
+							return;
+						}
 
-			await sendMessage({
-				as: 'ready-awk',
-				venousId: arterial.config.venousId,
-				sourceId: arterial.config.id,
-				destinationId: arterial.config.primaryDestinationId,
-				data: null,
+						// Standard processing
+						await context.primaryArterialLoop(message, transport);
+					} catch (e) {
+						console.error('Stem WS Parse Error', e);
+					}
+				});
 			});
 		},
 		sendMessage,
@@ -54,7 +60,9 @@ export function websocketStem({ wss }: { wss: WebSocketServer }) {
 }
 
 export function websocketConsumer({ url }: { url: string }) {
-	let socket: WebSocket;
+	let socket: WebSocket | null = null;
+	let isConnecting = false;
+	let context: { arterial: Arterial; loop: any };
 
 	async function sendMessage<DataType = unknown>(message: ArterialMessage<DataType>) {
 		if (!socket || socket.readyState !== WebSocket.OPEN) return false;
@@ -67,37 +75,62 @@ export function websocketConsumer({ url }: { url: string }) {
 		}
 	}
 
-	return {
-		async init(arterial, primaryArterialLoop) {
-			socket = new WebSocket(url);
 
-			await new Promise<void>((resolve, reject) => {
-				socket.onopen = () => resolve();
-				socket.onerror = (err) => reject(err);
-			});
+	// The isolated "Retry Loop" logic
+	function establishConnection() {
+		if (isConnecting || !context) return;
+		isConnecting = true;
 
-			socket.onmessage = async (event) => {
-				try {
-					const parsedMessage = JSON.parse(event.data) as ArterialMessage;
-					await primaryArterialLoop(parsedMessage, this);
-				} catch (e) {
-					console.error('Failed to parse incoming WS message', e);
-				}
-			};
+		const ws = new WebSocket(url);
 
-			await sendMessage({
+		ws.onopen = () => {
+			socket = ws;
+			isConnecting = false;
+
+			// Handshake: Announce we are ready
+			sendMessage({
 				as: 'ready',
-				venousId: arterial.config.venousId,
-				sourceId: arterial.config.id,
-				destinationId: arterial.config.primaryDestinationId,
+				venousId: context!.arterial.config.venousId,
+				sourceId: context!.arterial.config.id,
+				destinationId: context!.arterial.config.primaryDestinationId,
 				data: null,
 			});
+		};
 
-			await arterial.waitFor((message) =>
-				message.as === 'ready-awk' &&
-				message.sourceId === arterial.config.primaryDestinationId
-			);
+		ws.onmessage = async (event) => {
+			try {
+				const msg = JSON.parse(event.data);
+				// Standard processing
+				await context!.loop(msg, transport);
+			} catch (e) { console.error('WS Parse Error', e); }
+		};
+
+		ws.onclose = () => {
+			socket = null;
+			isConnecting = false;
+			// Internal Backoff & Retry
+			// This handles the "dev server reload" scenario automatically
+			setTimeout(establishConnection, 3000);
+		};
+	};
+
+	const transport = {
+		// Phase 1: Sync Configuration
+		init(arterial, primaryArterialLoop) {
+			context = { arterial, loop: primaryArterialLoop };
+		},
+
+		// Phase 2: Async Connection (Blocking until ready)
+		async connect() {
+			if (!context) throw new Error("Transport not initialized");
+			// Kick off the connection loop
+			establishConnection();
+			// BLOCK until the handshake completes.
+			// This ensures the transport is valid before the app proceeds.
+			await context.arterial.waitFor(msg => msg.as === 'ready-ack');
 		},
 		sendMessage,
 	} as ArterialTransportConsumer;
+
+	return transport;
 }

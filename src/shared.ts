@@ -4,7 +4,7 @@ export interface ArterialMessage<DataType = any> {
 	sourceId: string;
 	destinationId: string;
 	venousId: string;
-	as: 'invoke' | 'invoke-result' | 'invoke-error' | 'pulse' | 'ready' | 'ready-awk'
+	as: 'invoke' | 'invoke-result' | 'invoke-error' | 'pulse' | 'ready' | 'ready-ack'
 	data: DataType;
 }
 
@@ -19,8 +19,11 @@ export type ArterialMessageInvokeResultData<ResultType = unknown> = ArterialMess
 	resultError?: string;
 }
 
+export type ArterialPrimaryLoopType = (message: ArterialMessage, transport: ArterialTransportConsumer) => Promise<void>;
+
 export type ArterialTransportConsumer = {
-	init: (arterial: Arterial, primaryArterialLoop: (message: ArterialMessage, transport: ArterialTransportConsumer) => Promise<void>) => Promise<void>;
+	connect: () => Promise<void>;
+	init: (arterial: Arterial, primaryArterialLoop: ArterialPrimaryLoopType) => Promise<void>;
 	sendMessage: <DataType = unknown>(message: ArterialMessage<DataType>) => Promise<boolean>;
 	isStem?: boolean;
 }

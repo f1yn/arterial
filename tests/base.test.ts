@@ -1,10 +1,11 @@
-import { expect, describe, it, afterEach } from 'vitest'
+import { expect, describe, it, afterEach, beforeEach } from 'vitest'
 import { WebSocketServer } from 'ws';
 import { createFlatPromise } from '../src/shared';
 
 import { messagePortStem, messagePortConsumer } from '../src/transports/messagePort';
 import { websocketStem, websocketConsumer } from '../src/transports/websocket';
 import createArterial from "../src/arterial";
+
 
 describe('Arterial system', () => {
 	const activeSockets = new Set<WebSocketServer>();
@@ -138,25 +139,6 @@ describe('Arterial system', () => {
 	});
 
 	it.skip('wont processes nodes on separate venialIds', async () => {
-
-	})
-})
-
-describe('Venial resilience', () => {
-	it.skip('requests to a missing arterial node will fail', async () => {
-		// node A (consumer) OFFLINE
-		// node B (stem to node A, consumer to node C)
-		// node C (stem to node B)
-
-		// Node C -> Node A
-	})
-
-	it.skip('requests to a live node (when an intermittent arterial fails) will succeed', async () => {
-		// node A (consumer)
-		// node B (stem to node A, consumer to node C) OFFLINE
-		// node C (stem to node B)
-
-		// Node C -> Node A
 
 	})
 })

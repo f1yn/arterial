@@ -203,7 +203,14 @@ export default function createArterial({ id, venousId, primaryDestinationId, tra
 
 	async function init() {
 		// TODO: un-init transports if already stately ran
-		await Promise.all(transports.map(t => t.init(arterial, primaryArterialLoop)));
+		const connections = [];
+
+		for (const transport of transports) {
+			transport.init(arterial, primaryArterialLoop);
+			connections.push(transport.connect())
+		}
+
+		await Promise.all(connections);
 	}
 
 	return arterial;

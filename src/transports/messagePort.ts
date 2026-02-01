@@ -1,6 +1,8 @@
-import type { ArterialMessage, ArterialTransportConsumer } from "../shared";
+import type { Arterial } from "../arterial";
+import type { ArterialMessage, ArterialTransportConsumer, ArterialPrimaryLoopType } from "../shared";
 
 export function messagePortStem({ sendPort }: { sendPort: (port: MessagePort) => Promise<void> | void }) {
+	let context: { arterial: Arterial, primaryArterialLoop: ArterialPrimaryLoopType };
 	let stemPort: MessagePort;
 
 	async function sendMessage<DataType = unknown>(message: ArterialMessage<DataType>) {
@@ -14,33 +16,36 @@ export function messagePortStem({ sendPort }: { sendPort: (port: MessagePort) =>
 	}
 
 	return {
-		async init(arterial, primaryArterialLoop) {
+		init(arterial, primaryArterialLoop) {
+			context = { arterial, primaryArterialLoop }
+		},
+		async connect() {
+			if (!context) throw new Error('Transport not initialized');
+			const transport = this;
+
 			const channel = new MessageChannel();
 			stemPort = channel.port1;
 
-			const primaryMessageHandler = async (rawMessage: any) => {
-				// IMPORTANT: If needed, we can also specify the loop here
-				await primaryArterialLoop(rawMessage.data as ArterialMessage, this);
-			}
+			stemPort.onmessage = async (event) => {
+				const message = event.data as ArterialMessage;
 
-			stemPort.addEventListener('message', primaryMessageHandler);
+				// Handles the case where the Consumer (UI) reloaded, but this Stem (Worker) stayed alive.
+				if (message.as === 'ready') {
+					await sendMessage({
+						as: 'ready-ack',
+						venousId: context.arterial.config.venousId,
+						sourceId: context.arterial.config.id,
+						destinationId: message.sourceId,
+						data: null,
+					});
+					return;
+				}
 
-			const pendingResponse = arterial.waitFor((message) => (
-				message.as === 'ready' &&
-				message.sourceId === arterial.config.primaryDestinationId
-			));
+				await context.primaryArterialLoop(message, transport);
+			};
 
-			// Propagate to destination client (stacks through protocol)
+			// Send the other end of the pipe to the consumer
 			await sendPort(channel.port2);
-			await pendingResponse;
-
-			await sendMessage({
-				as: 'ready-awk',
-				venousId: arterial.config.venousId,
-				sourceId: arterial.config.id,
-				destinationId: arterial.config.primaryDestinationId,
-				data: null,
-			})
 		},
 		sendMessage,
 		isStem: true,
@@ -48,6 +53,7 @@ export function messagePortStem({ sendPort }: { sendPort: (port: MessagePort) =>
 }
 
 export function messagePortConsumer({ getPort }: { getPort: () => Promise<MessagePort> | MessagePort }) {
+	let context: { arterial: Arterial, primaryArterialLoop: ArterialPrimaryLoopType };
 	let consumerPort: MessagePort;
 
 	async function sendMessage<DataType = unknown>(message: ArterialMessage<DataType>) {
@@ -61,26 +67,35 @@ export function messagePortConsumer({ getPort }: { getPort: () => Promise<Messag
 	}
 
 	return {
-		async init(arterial, primaryArterialLoop) {
-			// IMPORTANT: We need to potentially add the ability to poll this method
+		init(arterial, primaryArterialLoop) {
+			context = { arterial, primaryArterialLoop }
+		},
+		async connect() {
+			if (!context) throw new Error("Transport not initialized");
+			const transport = this;
+
+			// Get the physical port (this might wait for the iframe/worker to spawn)
 			consumerPort = await getPort();
 
-			const primaryMessageHandler = async (rawMessage: any) => {
-				// IMPORTANT: If needed, we can also specify the loop here
-				await primaryArterialLoop(rawMessage.data as ArterialMessage, this);
-			}
+			// Bind listeners
+			consumerPort.onmessage = async (event) => {
+				await context.primaryArterialLoop(event.data, transport);
+			};
 
-			consumerPort.addEventListener('message', primaryMessageHandler);
-
+			// Send Handshake
 			await sendMessage({
 				as: 'ready',
-				venousId: arterial.config.venousId,
-				sourceId: arterial.config.id,
-				destinationId: arterial.config.primaryDestinationId,
+				venousId: context.arterial.config.venousId,
+				sourceId: context.arterial.config.id,
+				destinationId: context.arterial.config.primaryDestinationId,
 				data: null,
 			});
 
-			await arterial.waitFor((message) => message.as === 'ready-awk' && message.sourceId === arterial.config.primaryDestinationId);
+			// Wait for ACK
+			await context.arterial.waitFor((message) =>
+				message.as === 'ready-ack' &&
+				message.sourceId === context!.arterial.config.primaryDestinationId
+			);
 		},
 		sendMessage,
 	} as ArterialTransportConsumer;
