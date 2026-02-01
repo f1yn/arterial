@@ -1,6 +1,6 @@
 {
 	"name": "arterial",
-	"version": "0.0.2",
+	"version": "0.0.3",
 	"description": "A self-healing communication layer for adaptive and resilient systems",
 	"type": "module",
 	"main": "./dist/arterial.mjs",
@@ -35,11 +35,17 @@
 		},
 		"./transports/websocket": {
 			"types": "./dist/transports/websocket.d.mts",
-			"import": "./dist/transports/websocket.mjs"
+			"import": "./dist/transports/websocket.mjs",
+			"default":"./dist/transports/websocket.mjs"
 		},
 		"./transports/messagePort": {
 			"types": "./dist/transports/messagePort.d.mts",
-			"import": "./dist/transports/messagePort.mjs"
+			"import": "./dist/transports/messagePort.mjs",
+			"default": "./dist/transports/messagePort.mjs"
+		},
+		"./package.json": {
+			"import": "./package.json",
+			"default": "./package.json"
 		}
 	},
 	"devDependencies": {
