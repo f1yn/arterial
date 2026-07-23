@@ -1,6 +1,6 @@
 {
 	"name": "arterial",
-	"version": "0.0.4",
+	"version": "0.1.0",
 	"description": "A self-healing communication layer for adaptive and resilient systems",
 	"type": "module",
 	"main": "./dist/arterial.mjs",
@@ -11,7 +11,9 @@
 	"scripts": {
 		"build": "tsdown ./src/arterial.ts ./src/transports/*.ts  --unbundle --dts",
 		"dev": "npm run build -- --watch",
-		"test": "vitest"
+		"test": "vitest",
+		"test:run": "vitest run",
+		"test:coverage": "vitest run --coverage"
 	},
 	"author": "Flynn Buckingham",
 	"license": "MIT",
@@ -21,6 +23,8 @@
 		"package.json",
 		"package-lock.json",
 		"INTENT",
+		"CHANGELOG.md",
+		"docs/",
 		"src/",
 		"dist/"
 	],
@@ -52,9 +56,11 @@
 	},
 	"devDependencies": {
 		"@types/ws": "^8.18.1",
-		"tsdown": "^0.20.1",
+		"@vitest/coverage-v8": "^4.0.18",
+		"tsdown": "^0.22.13",
 		"typescript": "^5.9.3",
-		"vitest": "^4.0.18"
+		"vitest": "^4.0.18",
+		"ws": "^8.19.0"
 	},
 	"peerDependencies": {
 		"ws": "^8.19.0"

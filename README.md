@@ -14,7 +14,7 @@ It is designed to support high-availability failover (e.g., swapping from a loca
 - **Transport Agnostic:** Run the exact same logic over `MessagePort` (Electron/Workers) or `WebSocket` (Network).
 - **Venous Graph:** Nodes are isolated by a `venousId`, allowing multiple private networks to coexist on the same transport.
 - **Typed RPC:** Strict TypeScript support for method invocation and return types.
-- **Resilience:** (Coming Soon) Automatic failover to backup transports if the primary "artery" is severed.
+- **Resilience:** Automatic failover to backup transports if the primary "artery" is severed. Configure transports in priority order — if the primary fails, the next available transport is used automatically.
 
 ## Installation
 
@@ -126,3 +126,23 @@ Ideal for communicating between a browser and a backend service, or between micr
 ```typescript
 import { websocketStem, websocketConsumer } from 'arterial/transports/websocket';
 ```
+
+## Testing
+
+Requires Node.js 22 or later.
+
+```bash
+npm install
+npm run test:run        # run all tests once
+npm test                # watch mode
+npm run test:coverage   # run with coverage report
+```
+
+See [tests/README.md](tests/README.md) for the full feature matrix, file guide, and conventions for adding tests.
+
+## Documentation
+
+System modeling schematics for planning arterial topologies:
+
+- [Electron port forwarding](docs/electron-port-forwarding.md) — agnostic MessagePort pattern for cross-process RPC
+- [System models](docs/system-models.md) — two-node RPC, dual-transport failover, and distributed core + services patterns

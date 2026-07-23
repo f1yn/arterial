@@ -2,17 +2,51 @@ import type { Arterial } from "../arterial";
 import type { ArterialMessage, ArterialTransportConsumer, ArterialPrimaryLoopType } from "../shared";
 import { type WebSocketServer, WebSocket as WsSocket } from "ws";
 
+// WebSocket transport for network boundaries (browser ↔ backend, microservices).
+
+function createTransportHealth() {
+	let healthy = true;
+	const disconnectCallbacks = new Set<() => void>();
+
+	function markHealthy() {
+		healthy = true;
+	}
+
+	function markUnhealthy() {
+		if (!healthy) return;
+		healthy = false;
+		for (const callback of disconnectCallbacks) {
+			callback();
+		}
+	}
+
+	return {
+		isHealthy: () => healthy,
+		markHealthy,
+		markUnhealthy,
+		onDisconnect: (callback: () => void) => {
+			disconnectCallbacks.add(callback);
+		},
+	};
+}
+
+/**
+ * Stem side of a WebSocket transport. Listens on an existing `WebSocketServer` for consumer connections.
+ */
 export function websocketStem({ wss }: { wss: WebSocketServer }) {
 	let context: { arterial: Arterial, primaryArterialLoop: ArterialPrimaryLoopType };
 	let socket: WsSocket;
+	const health = createTransportHealth();
 
 	async function sendMessage<DataType = unknown>(message: ArterialMessage<DataType>) {
+		if (!health.isHealthy()) return false;
 		if (!socket || socket.readyState !== WsSocket.OPEN) return false;
 		try {
 			socket.send(JSON.stringify(message));
 			return true;
 		} catch (transportError) {
 			console.error('Transport error', transportError);
+			health.markUnhealthy();
 			return false;
 		}
 	}
@@ -27,15 +61,14 @@ export function websocketStem({ wss }: { wss: WebSocketServer }) {
 
 			wss.on('connection', (ws) => {
 				socket = ws;
+				health.markHealthy();
 
 				ws.on('message', async (data) => {
 					try {
 						const message = JSON.parse(data.toString()) as ArterialMessage;
 
-						// HANDSHAKE INTERCEPT
-						// If a Consumer (re)loads and sends 'ready', we must ACK it immediately.
-						// This allows the Consumer to finish its own connect() sequence.
 						if (message.as === 'ready' && message.destinationId === context!.arterial.config.id) {
+							health.markHealthy();
 							sendMessage({
 								as: 'ready-ack',
 								venousId: context.arterial.config.venousId,
@@ -46,48 +79,77 @@ export function websocketStem({ wss }: { wss: WebSocketServer }) {
 							return;
 						}
 
-						// Standard processing
 						await context.primaryArterialLoop(message, transport);
 					} catch (e) {
 						console.error('Stem WS Parse Error', e);
 					}
 				});
+
+				ws.on('close', () => {
+					health.markUnhealthy();
+				});
 			});
 		},
 		sendMessage,
 		isStem: true,
+		isHealthy: health.isHealthy,
+		onDisconnect: health.onDisconnect,
+		disconnect() {
+			socket?.close();
+			health.markUnhealthy();
+		},
 	} as ArterialTransportConsumer;
 }
 
-export function websocketConsumer({ url }: { url: string }) {
+/**
+ * Consumer side of a WebSocket transport. Dials `url` and auto-reconnects on close when `reconnect` is true.
+ */
+export function websocketConsumer({ url, reconnectDelayMs = 3000, reconnect = true }: { url: string; reconnectDelayMs?: number; reconnect?: boolean }) {
 	let socket: WebSocket | null = null;
 	let isConnecting = false;
-	let context: { arterial: Arterial; loop: any };
+	let gotReadyAck = false;
+	let context: { arterial: Arterial; loop: ArterialPrimaryLoopType };
+	const health = createTransportHealth();
 
 	async function sendMessage<DataType = unknown>(message: ArterialMessage<DataType>) {
+		if (!health.isHealthy()) return false;
 		if (!socket || socket.readyState !== WebSocket.OPEN) return false;
 		try {
 			socket.send(JSON.stringify(message));
 			return true;
 		} catch (transportError) {
 			console.error('Transport error', transportError);
+			health.markUnhealthy();
 			return false;
 		}
 	}
 
+	function waitForHandshake() {
+		return new Promise<void>((resolve, reject) => {
+			const deadline = setTimeout(() => reject(new Error('WebSocket handshake timeout')), 10000);
 
-	// The isolated "Retry Loop" logic
+			const wait = setInterval(() => {
+				if (gotReadyAck && socket?.readyState === WebSocket.OPEN) {
+					clearInterval(wait);
+					clearTimeout(deadline);
+					resolve();
+				}
+			}, 10);
+		});
+	}
+
 	function establishConnection() {
 		if (isConnecting || !context) return;
 		isConnecting = true;
+		gotReadyAck = false;
 
 		const ws = new WebSocket(url);
 
 		ws.onopen = () => {
 			socket = ws;
 			isConnecting = false;
+			health.markHealthy();
 
-			// Handshake: Announce we are ready
 			sendMessage({
 				as: 'ready',
 				venousId: context!.arterial.config.venousId,
@@ -100,7 +162,10 @@ export function websocketConsumer({ url }: { url: string }) {
 		ws.onmessage = async (event) => {
 			try {
 				const msg = JSON.parse(event.data);
-				// Standard processing
+				if (msg.as === 'ready-ack' && msg.sourceId === context!.arterial.config.primaryDestinationId) {
+					gotReadyAck = true;
+					health.markHealthy();
+				}
 				await context!.loop(msg, transport);
 			} catch (e) { console.error('WS Parse Error', e); }
 		};
@@ -108,28 +173,33 @@ export function websocketConsumer({ url }: { url: string }) {
 		ws.onclose = () => {
 			socket = null;
 			isConnecting = false;
-			// Internal Backoff & Retry
-			// This handles the "dev server reload" scenario automatically
-			setTimeout(establishConnection, 3000);
+			gotReadyAck = false;
+			health.markUnhealthy();
+			if (reconnect) {
+				setTimeout(establishConnection, reconnectDelayMs);
+			}
 		};
 	};
 
 	const transport = {
-		// Phase 1: Sync Configuration
 		init(arterial, primaryArterialLoop) {
 			context = { arterial, loop: primaryArterialLoop };
 		},
 
-		// Phase 2: Async Connection (Blocking until ready)
 		async connect() {
 			if (!context) throw new Error("Transport not initialized");
-			// Kick off the connection loop
 			establishConnection();
-			// BLOCK until the handshake completes.
-			// This ensures the transport is valid before the app proceeds.
-			await context.arterial.waitFor(msg => msg.as === 'ready-ack');
+			// IMPORTANT: Wait for this transport's own handshake — not the shared arterial waitFor,
+			// which would resolve early when another transport (e.g. MessagePort) acks first.
+			await waitForHandshake();
 		},
 		sendMessage,
+		isHealthy: health.isHealthy,
+		onDisconnect: health.onDisconnect,
+		disconnect() {
+			socket?.close();
+			health.markUnhealthy();
+		},
 	} as ArterialTransportConsumer;
 
 	return transport;

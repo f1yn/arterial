@@ -1,5 +1,9 @@
 import type { Arterial } from "./arterial";
 
+/**
+ * Envelope for all arterial wire messages. Nodes filter by `venousId` and route by `destinationId`.
+ * The `as` field distinguishes handshakes, RPC, heartbeats, and errors.
+ */
 export interface ArterialMessage<DataType = any> {
 	sourceId: string;
 	destinationId: string;
@@ -21,11 +25,18 @@ export type ArterialMessageInvokeResultData<ResultType = unknown> = ArterialMess
 
 export type ArterialPrimaryLoopType = (message: ArterialMessage, transport: ArterialTransportConsumer) => Promise<void>;
 
+/**
+ * Contract for a physical transport adapter. Transports are tried in array order during failover.
+ * `init` wires the node loop; `connect` performs the handshake; `sendMessage` returns false when unavailable.
+ */
 export type ArterialTransportConsumer = {
 	connect: () => Promise<void>;
 	init: (arterial: Arterial, primaryArterialLoop: ArterialPrimaryLoopType) => Promise<void>;
 	sendMessage: <DataType = unknown>(message: ArterialMessage<DataType>) => Promise<boolean>;
 	isStem?: boolean;
+	isHealthy?: () => boolean;
+	onDisconnect?: (callback: () => void) => void;
+	disconnect?: () => void;
 }
 
 export function createFlatPromise<ResultType = void>() {
